@@ -1,0 +1,6 @@
+{
+  "name": "AutoML Studio",
+  "description": "Clean, 100% client-side No-Code AutoML Studio for CSV auditing, automated model training, visual evaluation, live what-if prediction, and Python/JSON export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
