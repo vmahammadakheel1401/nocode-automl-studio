@@ -13,9 +13,33 @@ export interface ColumnStat {
   step?: number;
   mode?: string;
   categories?: string[];
+  hasOtherBucket?: boolean;
   sampleValues: string[];
   isLikelyId: boolean;
   idReason?: string;
+}
+
+export interface DroppedColumnInfo {
+  name: string;
+  reason: 'sparse' | 'constant';
+  detail: string;
+}
+
+export interface CleaningReport {
+  originalRowCount: number;
+  cleanedRowCount: number;
+  sampledRowCount: number;
+  wasSampled: boolean;
+  originalColumnCount: number;
+  cleanedColumnCount: number;
+  strippedSubHeaderRows: number;
+  subHeaderSampleText?: string;
+  sentinelValuesConverted: number;
+  sentinelColumns: string[];
+  droppedColumns: DroppedColumnInfo[];
+  droppedSparseCount: number;
+  droppedConstantCount: number;
+  cappedCategoricalColumns: string[];
 }
 
 export interface ParsedDataset {
@@ -32,6 +56,7 @@ export interface ParsedDataset {
   categoricalCount: number;
   idCount: number;
   defaultTarget: string;
+  cleaningReport: CleaningReport;
 }
 
 export interface FeatureEncoderSpec {
@@ -47,6 +72,7 @@ export interface FeatureEncoderSpec {
   // For categorical
   mode?: string;
   categories?: string[];
+  hasOtherBucket?: boolean;
   encodedStartIndex: number;
   encodedLength: number;
 }

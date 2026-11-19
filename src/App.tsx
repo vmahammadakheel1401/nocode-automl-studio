@@ -244,8 +244,8 @@ export default function App() {
 
       for (const item of algoQueue) {
         updateStage(item.stageId, 'running');
-        await sleep(140);
-        const result = trainSingleAlgorithm(item.key, prepared);
+        await sleep(100);
+        const result = await trainSingleAlgorithm(item.key, prepared);
         trainedModels.push(result);
         updateStage(item.stageId, 'done');
       }

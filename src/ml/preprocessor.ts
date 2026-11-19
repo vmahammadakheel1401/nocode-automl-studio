@@ -155,7 +155,7 @@ export function prepareTrainingData(
       encodedColumnToRaw.push(stat.name);
       encodedOffset += 1;
     } else {
-      // Categorical
+      // Categorical: cap to top 20 categories and group the rest into "Other"
       const freq = new Map<string, number>();
       for (const r of trainRows) {
         const raw = r[stat.name];
@@ -168,8 +168,9 @@ export function prepareTrainingData(
         .sort((a, b) => b[1] - a[1])
         .map(([k]) => k);
       const mode = sortedCats[0] ?? stat.mode ?? 'Unknown';
-      // Keep up to 12 categories to keep browser vector compact
-      const keptCategories = sortedCats.slice(0, 12);
+      const hasOverflow = sortedCats.length > 20;
+      const top20 = sortedCats.slice(0, 20);
+      const keptCategories = hasOverflow ? [...top20, 'Other'] : top20;
       const encLen = Math.max(1, keptCategories.length);
 
       specs.push({
@@ -177,6 +178,7 @@ export function prepareTrainingData(
         type: 'categorical',
         mode,
         categories: keptCategories.length > 0 ? keptCategories : [mode],
+        hasOtherBucket: hasOverflow || stat.hasOtherBucket,
         encodedStartIndex: encodedOffset,
         encodedLength: encLen,
       });
@@ -263,7 +265,10 @@ export function transformSingleRow(
           ? spec.mode ?? ''
           : String(rawVal).trim();
       const cats = spec.categories ?? [];
-      const idx = cats.indexOf(strVal);
+      let idx = cats.indexOf(strVal);
+      if (idx < 0 && spec.hasOtherBucket) {
+        idx = cats.indexOf('Other');
+      }
       if (idx >= 0) {
         vec[spec.encodedStartIndex + idx] = 1;
       }

@@ -1,10 +1,42 @@
-import { ColumnStat, ColumnType, ParsedDataset, TaskType } from './types';
+import {
+  CleaningReport,
+  ColumnStat,
+  ColumnType,
+  DroppedColumnInfo,
+  ParsedDataset,
+  TaskType,
+} from './types';
 
-const MISSING_TOKENS = new Set(['', 'na', 'n/a', 'null', 'none', 'nan', '?', '-']);
+const MISSING_TOKENS = new Set([
+  '',
+  'na',
+  'n/a',
+  'null',
+  'none',
+  'nan',
+  '?',
+  '-',
+  '#n/a',
+  '#na',
+]);
+
+const MAX_ROWS_FOR_BROWSER = 2500;
+const MAX_TOP_CATEGORIES = 20;
 
 export function isMissingValue(val: string | undefined | null): boolean {
   if (val === undefined || val === null) return true;
   return MISSING_TOKENS.has(val.trim().toLowerCase());
+}
+
+function isNumericToken(val: string): boolean {
+  const cleaned = val.trim().replace(/[$,%]/g, '');
+  if (cleaned === '') return false;
+  return Number.isFinite(Number(cleaned));
+}
+
+function isSentinelMinusOne(val: string): boolean {
+  const t = val.trim();
+  return t === '-1' || t === '-1.0';
 }
 
 /**
@@ -69,7 +101,6 @@ export function parseCSVText(text: string): { headers: string[]; rawRows: string
   }
 
   const rawHeaders = rows[0].map((h, idx) => (h.trim() ? h.trim() : `column_${idx + 1}`));
-  // Ensure unique headers
   const seenHeaders = new Map<string, number>();
   const headers = rawHeaders.map((h) => {
     const count = seenHeaders.get(h) ?? 0;
@@ -84,6 +115,71 @@ export function parseCSVText(text: string): { headers: string[]; rawRows: string
   });
 
   return { headers, rawRows: dataRows };
+}
+
+/**
+ * Detect if Row 1 (index 0 of data rows) is a descriptive metadata sub-header row
+ * (e.g., survey question prompts like Kaggle/Qualtrics exports) where Rows 2-20 are numeric.
+ */
+function detectMetadataSubHeaderRow(
+  headers: string[],
+  rawRows: string[][]
+): { shouldStrip: boolean; sampleText?: string } {
+  if (rawRows.length < 3) {
+    return { shouldStrip: false };
+  }
+
+  const row1 = rawRows[0];
+  const sampleWindow = rawRows.slice(1, 20); // Rows 2-20
+  let numericColsInWindow = 0;
+  let descriptiveMismatchCols = 0;
+  let sampleText: string | undefined;
+
+  for (let c = 0; c < headers.length; c++) {
+    const windowVals = sampleWindow
+      .map((r) => r[c] ?? '')
+      .filter((v) => !isMissingValue(v));
+
+    if (windowVals.length < 2) continue;
+
+    const numericCount = windowVals.filter((v) => isNumericToken(v)).length;
+    const isWindowNumeric = numericCount / windowVals.length >= 0.75;
+
+    if (isWindowNumeric) {
+      numericColsInWindow++;
+      const row1Val = (row1[c] ?? '').trim();
+      if (!isMissingValue(row1Val) && !isNumericToken(row1Val)) {
+        descriptiveMismatchCols++;
+        if (!sampleText) {
+          sampleText =
+            row1Val.length > 64 ? `${row1Val.slice(0, 61)}...` : row1Val;
+        }
+      }
+    }
+  }
+
+  const shouldStrip =
+    numericColsInWindow >= 1 &&
+    (descriptiveMismatchCols >= 2 ||
+      (numericColsInWindow <= 2 && descriptiveMismatchCols >= 1));
+
+  return { shouldStrip, sampleText };
+}
+
+function seededSampleRows<T>(arr: T[], maxRows: number, seed = 4207): T[] {
+  if (arr.length <= maxRows) return arr;
+  // Reservoir-style deterministic shuffle of indices
+  const indices = arr.map((_, i) => i);
+  let s = seed >>> 0;
+  for (let i = indices.length - 1; i > 0; i--) {
+    s = (1664525 * s + 1013904223) >>> 0;
+    const j = s % (i + 1);
+    const tmp = indices[i];
+    indices[i] = indices[j];
+    indices[j] = tmp;
+  }
+  const chosen = indices.slice(0, maxRows).sort((a, b) => a - b);
+  return chosen.map((i) => arr[i]);
 }
 
 function computeMedian(sortedNums: number[]): number {
@@ -121,7 +217,7 @@ function detectIdColumn(
   const matchesIdName =
     lower === 'id' ||
     lower.endsWith('_id') ||
-    lower.endsWith('id') && lower.length <= 14 ||
+    (lower.endsWith('id') && lower.length <= 14) ||
     lower === 'uuid' ||
     lower === 'guid' ||
     lower === 'row_id' ||
@@ -135,7 +231,6 @@ function detectIdColumn(
     };
   }
 
-  // Non-numeric column with 100% unique values across >= 12 rows (e.g. CUST-1001, PROP-204)
   if (!isNumeric && uniqueCount === nonMissingValues.length && nonMissingValues.length >= 12) {
     return {
       isLikelyId: true,
@@ -143,7 +238,6 @@ function detectIdColumn(
     };
   }
 
-  // Monotonically increasing integer sequence 1..N
   if (isNumeric && uniqueCount === nonMissingValues.length && nonMissingValues.length >= 15) {
     const nums = nonMissingValues.map(Number);
     let isSequential = true;
@@ -170,19 +264,174 @@ export function buildDatasetFromCSV(
   label?: string,
   preferredTarget?: string
 ): ParsedDataset {
-  const { headers, rawRows } = parseCSVText(csvText);
-  const rows: Record<string, string>[] = rawRows.map((arr) => {
+  const { headers: rawHeaders, rawRows: parsedRawRows } = parseCSVText(csvText);
+  const originalRowCount = parsedRawRows.length;
+  const originalColumnCount = rawHeaders.length;
+
+  // 1. Strip Metadata Sub-Header Rows (Row 1 descriptive text when Rows 2-20 are numeric)
+  let workingRows = parsedRawRows;
+  let strippedSubHeaderRows = 0;
+  let subHeaderSampleText: string | undefined;
+
+  const subHeaderCheck = detectMetadataSubHeaderRow(rawHeaders, workingRows);
+  if (subHeaderCheck.shouldStrip) {
+    workingRows = workingRows.slice(1);
+    strippedSubHeaderRows = 1;
+    subHeaderSampleText = subHeaderCheck.sampleText;
+  }
+
+  if (workingRows.length === 0) {
+    throw new Error('CSV contains no usable data rows after stripping metadata sub-header.');
+  }
+
+  // 2. Sample up to 2,500 rows for large datasets to keep browser responsive
+  const cleanedRowCount = workingRows.length;
+  const wasSampled = workingRows.length > MAX_ROWS_FOR_BROWSER;
+  if (wasSampled) {
+    workingRows = seededSampleRows(workingRows, MAX_ROWS_FOR_BROWSER);
+  }
+  const sampledRowCount = workingRows.length;
+
+  // 3. Convert Sentinel Values (-1, N/A, ?) to Nulls ("")
+  let sentinelValuesConverted = 0;
+  const sentinelColumnsSet = new Set<string>();
+
+  const colCount = rawHeaders.length;
+  const rowCount = workingRows.length;
+
+  // Determine per-column whether standalone -1 should be treated as null
+  const treatMinusOneAsNull = rawHeaders.map((header, colIdx) => {
+    const isOtherTextCol = /_other_text$/i.test(header) || /other_text/i.test(header);
+    let missingOrSentinel = 0;
+    let minusOneCount = 0;
+    let nonMissingNonMinusOneCount = 0;
+    let hasNegativeOtherThanMinusOne = false;
+
+    for (let r = 0; r < rowCount; r++) {
+      const cell = (workingRows[r][colIdx] ?? '').trim();
+      if (isMissingValue(cell)) {
+        missingOrSentinel++;
+      } else if (isSentinelMinusOne(cell)) {
+        minusOneCount++;
+      } else {
+        nonMissingNonMinusOneCount++;
+        if (isNumericToken(cell)) {
+          const n = Number(cell.replace(/[$,%]/g, ''));
+          if (n < 0) hasNegativeOtherThanMinusOne = true;
+        }
+      }
+    }
+
+    if (minusOneCount === 0) return false;
+    if (isOtherTextCol) return true;
+
+    const missingRate = missingOrSentinel / rowCount;
+    const isSparse = missingRate > 0.2 || (missingOrSentinel + minusOneCount) / rowCount > 0.35;
+    if (isSparse && !hasNegativeOtherThanMinusOne) {
+      return true;
+    }
+    // Also if column is primarily non-numeric strings (e.g. text survey responses with -1 skipped code)
+    if (nonMissingNonMinusOneCount > 0) {
+      let textCount = 0;
+      for (let r = 0; r < rowCount; r++) {
+        const cell = (workingRows[r][colIdx] ?? '').trim();
+        if (!isMissingValue(cell) && !isSentinelMinusOne(cell) && !isNumericToken(cell)) {
+          textCount++;
+        }
+      }
+      if (textCount / nonMissingNonMinusOneCount >= 0.5) {
+        return true;
+      }
+    }
+    return false;
+  });
+
+  // Apply sentinel normalization in-place on a cloned matrix
+  const normalizedMatrix: string[][] = workingRows.map((row) =>
+    row.map((rawCell, colIdx) => {
+      const trimmed = (rawCell ?? '').trim();
+      if (trimmed !== '' && MISSING_TOKENS.has(trimmed.toLowerCase())) {
+        sentinelValuesConverted++;
+        sentinelColumnsSet.add(rawHeaders[colIdx]);
+        return '';
+      }
+      if (treatMinusOneAsNull[colIdx] && isSentinelMinusOne(trimmed)) {
+        sentinelValuesConverted++;
+        sentinelColumnsSet.add(rawHeaders[colIdx]);
+        return '';
+      }
+      return trimmed;
+    })
+  );
+
+  // 4. Prune Sparse (>80% missing) & Constant (<= 1 unique value) Columns
+  const keptColIndices: number[] = [];
+  const droppedColumns: DroppedColumnInfo[] = [];
+  let droppedSparseCount = 0;
+  let droppedConstantCount = 0;
+
+  for (let c = 0; c < colCount; c++) {
+    const colName = rawHeaders[c];
+    let missing = 0;
+    const uniqueNonMissing = new Set<string>();
+
+    for (let r = 0; r < rowCount; r++) {
+      const val = normalizedMatrix[r][c];
+      if (val === '') {
+        missing++;
+      } else {
+        uniqueNonMissing.add(val);
+      }
+    }
+
+    const missingPct = missing / rowCount;
+    if (missingPct > 0.8) {
+      droppedSparseCount++;
+      droppedColumns.push({
+        name: colName,
+        reason: 'sparse',
+        detail: `${Math.round(missingPct * 100)}% missing (>80% threshold)`,
+      });
+      continue;
+    }
+
+    if (uniqueNonMissing.size <= 1) {
+      droppedConstantCount++;
+      droppedColumns.push({
+        name: colName,
+        reason: 'constant',
+        detail:
+          uniqueNonMissing.size === 0
+            ? '0 non-missing values'
+            : `Only 1 unique value ("${Array.from(uniqueNonMissing)[0]}")`,
+      });
+      continue;
+    }
+
+    keptColIndices.push(c);
+  }
+
+  if (keptColIndices.length < 2) {
+    throw new Error(
+      'Fewer than 2 usable columns remained after pruning sparse (>80% missing) and constant columns.'
+    );
+  }
+
+  const headers = keptColIndices.map((c) => rawHeaders[c]);
+  const rows: Record<string, string>[] = normalizedMatrix.map((arr) => {
     const obj: Record<string, string> = {};
-    headers.forEach((h, i) => {
-      obj[h] = arr[i] ?? '';
+    keptColIndices.forEach((origIdx, newIdx) => {
+      obj[headers[newIdx]] = arr[origIdx] ?? '';
     });
     return obj;
   });
 
+  // 5. Audit remaining columns & cap categorical features to Top 20 + "Other"
   let missingCells = 0;
   let numericCount = 0;
   let categoricalCount = 0;
   let idCount = 0;
+  const cappedCategoricalColumns: string[] = [];
 
   const columnStats: ColumnStat[] = headers.map((header) => {
     const allVals = rows.map((r) => r[header]);
@@ -248,7 +497,7 @@ export function buildDatasetFromCSV(
       };
     }
 
-    // Categorical stats
+    // Categorical stats — cap to Top 20 categories + "Other"
     const freq = new Map<string, number>();
     for (const v of nonMissing) {
       freq.set(v, (freq.get(v) ?? 0) + 1);
@@ -257,20 +506,36 @@ export function buildDatasetFromCSV(
       .sort((a, b) => b[1] - a[1])
       .map(([cat]) => cat);
 
+    const hasOverflow = !idCheck.isLikelyId && sortedCats.length > MAX_TOP_CATEGORIES;
+    const topCategories = hasOverflow
+      ? [...sortedCats.slice(0, MAX_TOP_CATEGORIES), 'Other']
+      : sortedCats.slice(0, MAX_TOP_CATEGORIES);
+
+    if (hasOverflow) {
+      cappedCategoricalColumns.push(header);
+      const topSet = new Set(sortedCats.slice(0, MAX_TOP_CATEGORIES));
+      for (const r of rows) {
+        const val = r[header];
+        if (val !== '' && !topSet.has(val)) {
+          r[header] = 'Other';
+        }
+      }
+    }
+
     return {
       name: header,
       inferredType,
       missingCount: missing,
       uniqueCount: uniqueValues.length,
       mode: sortedCats[0] ?? '',
-      categories: sortedCats.slice(0, 20),
+      categories: topCategories,
+      hasOtherBucket: hasOverflow,
       sampleValues,
       isLikelyId: idCheck.isLikelyId,
       idReason: idCheck.reason,
     };
   });
 
-  // Choose default target: preferredTarget if present, else last non-id column
   const nonIdHeaders = columnStats
     .filter((c) => c.inferredType !== 'id')
     .map((c) => c.name);
@@ -278,6 +543,23 @@ export function buildDatasetFromCSV(
     preferredTarget && headers.includes(preferredTarget)
       ? preferredTarget
       : nonIdHeaders[nonIdHeaders.length - 1] ?? headers[headers.length - 1];
+
+  const cleaningReport: CleaningReport = {
+    originalRowCount,
+    cleanedRowCount,
+    sampledRowCount,
+    wasSampled,
+    originalColumnCount,
+    cleanedColumnCount: headers.length,
+    strippedSubHeaderRows,
+    subHeaderSampleText,
+    sentinelValuesConverted,
+    sentinelColumns: Array.from(sentinelColumnsSet),
+    droppedColumns,
+    droppedSparseCount,
+    droppedConstantCount,
+    cappedCategoricalColumns,
+  };
 
   return {
     id: `${fileName}-${Date.now()}`,
@@ -293,6 +575,7 @@ export function buildDatasetFromCSV(
     categoricalCount,
     idCount,
     defaultTarget,
+    cleaningReport,
   };
 }
 
@@ -304,7 +587,6 @@ export function inferTaskType(dataset: ParsedDataset, targetColumn: string): Tas
     return 'classification';
   }
 
-  // If numeric target has very few unique values (e.g., 0/1 or 1/2/3), treat as classification
   const nonMissing = dataset.rows
     .map((r) => r[targetColumn])
     .filter((v) => !isMissingValue(v));

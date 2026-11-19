@@ -12,6 +12,10 @@ import {
   TrainedModelResult,
 } from './types';
 
+function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function createRng(seed: number) {
   let s = seed >>> 0;
   return () => {
@@ -139,7 +143,7 @@ function fitRidgeRegression(X: number[][], y: number[], alpha = 1.5) {
   return { bias, weights };
 }
 
-function fitLogisticRegression(
+async function fitLogisticRegression(
   X: number[][],
   y: number[],
   numClasses: number,
@@ -155,6 +159,9 @@ function fitLogisticRegression(
     const lr = 0.25;
 
     for (let ep = 0; ep < epochs; ep++) {
+      if (ep > 0 && ep % 50 === 0) {
+        await yieldToBrowser();
+      }
       const gradW = new Array(p).fill(0);
       let gradB = 0;
 
@@ -190,6 +197,9 @@ function fitLogisticRegression(
   const lr = 0.25;
 
   for (let ep = 0; ep < epochs; ep++) {
+    if (ep > 0 && ep % 40 === 0) {
+      await yieldToBrowser();
+    }
     const gradW: number[][] = Array.from({ length: numClasses }, () =>
       new Array(p).fill(0)
     );
@@ -465,7 +475,7 @@ function predictTreeNode(node: SerializedTreeNode, x: number[]): SerializedTreeN
 // 3. Random Forest (20 Trees)
 // ============================================================================
 
-function fitRandomForest(
+async function fitRandomForest(
   X: number[][],
   y: number[],
   taskType: 'regression' | 'classification',
@@ -480,6 +490,9 @@ function fitRandomForest(
   const gainAccum = new Array(p).fill(0);
 
   for (let t = 0; t < nTrees; t++) {
+    if (t > 0 && t % 3 === 0) {
+      await yieldToBrowser();
+    }
     const sampleIndices: number[] = [];
     for (let i = 0; i < n; i++) {
       sampleIndices.push(Math.floor(rng() * n));
@@ -509,7 +522,7 @@ function fitRandomForest(
 // 4. Gradient Boosting (Regression, Binary & Multiclass)
 // ============================================================================
 
-function fitGradientBoosting(
+async function fitGradientBoosting(
   X: number[][],
   y: number[],
   taskType: 'regression' | 'classification',
@@ -528,6 +541,9 @@ function fitGradientBoosting(
     const trees: SerializedTreeNode[] = [];
 
     for (let m = 0; m < nEstimators; m++) {
+      if (m > 0 && m % 5 === 0) {
+        await yieldToBrowser();
+      }
       const residuals = y.map((yi, i) => yi - preds[i]);
       const tree = buildCartTree(
         X,
@@ -567,6 +583,9 @@ function fitGradientBoosting(
     const trees: SerializedTreeNode[] = [];
 
     for (let m = 0; m < nEstimators; m++) {
+      if (m > 0 && m % 5 === 0) {
+        await yieldToBrowser();
+      }
       const pseudoResiduals = y.map((yi, i) => yi - sigmoid(rawF[i]));
       const tree = buildCartTree(
         X,
@@ -605,6 +624,9 @@ function fitGradientBoosting(
   const multiTrees: SerializedTreeNode[][] = [];
 
   for (let m = 0; m < nEstimators; m++) {
+    if (m > 0 && m % 3 === 0) {
+      await yieldToBrowser();
+    }
     const roundTrees: SerializedTreeNode[] = [];
     const probsMatrix = rawF.map((row) => softmax(row));
 
@@ -854,10 +876,10 @@ function evaluateClassification(
   };
 }
 
-export function trainSingleAlgorithm(
+export async function trainSingleAlgorithm(
   algoKey: ModelAlgorithmKey,
   data: SplitPreparedData
-): TrainedModelResult {
+): Promise<TrainedModelResult> {
   const { preprocessor, XTrain, yTrain, XTest, yTest } = data;
   const taskType = preprocessor.taskType;
   const numClasses = preprocessor.classLabels?.length ?? 2;
@@ -880,7 +902,7 @@ export function trainSingleAlgorithm(
     name = 'Logistic Regression';
     sklearnName = 'LogisticRegression';
     family = 'Linear (L2)';
-    const res = fitLogisticRegression(XTrain, yTrain, numClasses);
+    const res = await fitLogisticRegression(XTrain, yTrain, numClasses);
     weights = res;
     if (res.multiWeights) {
       encodedImportances = new Array(preprocessor.encodedFeatureCount).fill(0);
@@ -899,6 +921,7 @@ export function trainSingleAlgorithm(
     family = 'CART Tree';
     const gainAccum = new Array(preprocessor.encodedFeatureCount).fill(0);
     const allIdx = Array.from({ length: XTrain.length }, (_, i) => i);
+    await yieldToBrowser();
     const tree = buildCartTree(
       XTrain,
       yTrain,
@@ -915,7 +938,7 @@ export function trainSingleAlgorithm(
     sklearnName =
       taskType === 'regression' ? 'RandomForestRegressor' : 'RandomForestClassifier';
     family = 'Bagged Ensemble (20 Trees)';
-    const res = fitRandomForest(XTrain, yTrain, taskType, numClasses, 20);
+    const res = await fitRandomForest(XTrain, yTrain, taskType, numClasses, 20);
     weights = { kind: 'forest', trees: res.trees };
     encodedImportances = res.gainAccum;
   } else {
@@ -925,7 +948,7 @@ export function trainSingleAlgorithm(
         ? 'GradientBoostingRegressor'
         : 'GradientBoostingClassifier';
     family = 'Boosted Ensemble (35 Stages)';
-    const res = fitGradientBoosting(XTrain, yTrain, taskType, numClasses);
+    const res = await fitGradientBoosting(XTrain, yTrain, taskType, numClasses);
     weights = res.weights;
     encodedImportances = res.gainAccum;
   }

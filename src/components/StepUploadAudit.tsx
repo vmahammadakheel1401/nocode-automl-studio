@@ -2,10 +2,12 @@ import React, { useRef, useState } from 'react';
 import {
   AlertCircle,
   ArrowRight,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Database,
   FileSpreadsheet,
+  Filter,
   Upload,
 } from 'lucide-react';
 import { SAMPLE_DATASET_META, SampleDatasetKey } from '../ml/sampleDatasets';
@@ -246,6 +248,146 @@ export const StepUploadAudit: React.FC<StepUploadAuditProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Data Cleaning Report Card */}
+          {(() => {
+            const report = dataset.cleaningReport;
+            const totalDropped = report.droppedColumns.length;
+            const hasAnyCleaningAction =
+              report.strippedSubHeaderRows > 0 ||
+              report.sentinelValuesConverted > 0 ||
+              totalDropped > 0 ||
+              report.wasSampled ||
+              report.cappedCategoricalColumns.length > 0;
+
+            return (
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <Filter className="w-4 h-4 text-indigo-600" />
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Data Cleaning Report
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Automated hygiene pass applied on upload ·{' '}
+                        <span className="font-mono tabular-nums">
+                          {report.originalColumnCount} → {report.cleanedColumnCount}
+                        </span>{' '}
+                        columns retained
+                      </p>
+                    </div>
+                  </div>
+
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border ${
+                      hasAnyCleaningAction
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    {hasAnyCleaningAction
+                      ? 'Auto-Cleaned & Verified'
+                      : 'Verified Clean Input'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-200">
+                  <div className="p-4">
+                    <div className="text-xs font-medium text-slate-500">
+                      Sub-Header Rows Stripped
+                    </div>
+                    <div className="text-lg font-bold font-mono tabular-nums text-slate-900 mt-1">
+                      {report.strippedSubHeaderRows}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1 truncate" title={report.subHeaderSampleText}>
+                      {report.strippedSubHeaderRows > 0
+                        ? `Removed Row 1 ("${report.subHeaderSampleText ?? 'metadata text'}")`
+                        : 'No descriptive sub-header row detected'}
+                    </div>
+                  </div>
+
+                  <div className="p-4">
+                    <div className="text-xs font-medium text-slate-500">
+                      Sentinels Converted to Null
+                    </div>
+                    <div className="text-lg font-bold font-mono tabular-nums text-slate-900 mt-1">
+                      {report.sentinelValuesConverted.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1 truncate">
+                      {report.sentinelValuesConverted > 0
+                        ? `Normalized -1, N/A, ? across ${report.sentinelColumns.length} col${report.sentinelColumns.length > 1 ? 's' : ''}`
+                        : 'No sentinel tokens (-1, N/A, ?) found'}
+                    </div>
+                  </div>
+
+                  <div className="p-4">
+                    <div className="text-xs font-medium text-slate-500">
+                      Dropped Sparse & Constant Cols
+                    </div>
+                    <div className="text-lg font-bold font-mono tabular-nums text-slate-900 mt-1">
+                      {totalDropped}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      {totalDropped > 0
+                        ? `${report.droppedSparseCount} sparse (>80% null) · ${report.droppedConstantCount} constant`
+                        : '0 columns exceeded 80% null or constant'}
+                    </div>
+                  </div>
+
+                  <div className="p-4">
+                    <div className="text-xs font-medium text-slate-500">
+                      Browser Performance Caps
+                    </div>
+                    <div className="text-lg font-bold font-mono tabular-nums text-slate-900 mt-1">
+                      {report.wasSampled
+                        ? `${report.sampledRowCount.toLocaleString()} / ${report.cleanedRowCount.toLocaleString()}`
+                        : `${report.sampledRowCount.toLocaleString()} rows`}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      {report.cappedCategoricalColumns.length > 0
+                        ? `${report.cappedCategoricalColumns.length} cat col${report.cappedCategoricalColumns.length > 1 ? 's' : ''} capped to Top 20 + Other`
+                        : report.wasSampled
+                        ? 'Sampled to 2,500 rows max'
+                        : 'Top 20 categories · ≤2,500 row cap'}
+                    </div>
+                  </div>
+                </div>
+
+                {(totalDropped > 0 || report.cappedCategoricalColumns.length > 0) && (
+                  <div className="px-6 py-3.5 border-t border-slate-200 bg-slate-50/70 space-y-2">
+                    {totalDropped > 0 && (
+                      <div className="text-xs text-slate-600">
+                        <span className="font-semibold text-slate-800">
+                          Pruned columns ({totalDropped}):
+                        </span>{' '}
+                        <span className="font-mono text-slate-700">
+                          {report.droppedColumns
+                            .slice(0, 8)
+                            .map((d) => `${d.name} (${d.detail})`)
+                            .join(', ')}
+                          {report.droppedColumns.length > 8
+                            ? ` +${report.droppedColumns.length - 8} more`
+                            : ''}
+                        </span>
+                      </div>
+                    )}
+                    {report.cappedCategoricalColumns.length > 0 && (
+                      <div className="text-xs text-slate-600">
+                        <span className="font-semibold text-slate-800">
+                          Top-20 category grouping (&ldquo;Other&rdquo;):
+                        </span>{' '}
+                        <span className="font-mono text-slate-700">
+                          {report.cappedCategoricalColumns.join(', ')}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Paginated Data Preview Table (8 rows/page) */}
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
