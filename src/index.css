@@ -18,6 +18,124 @@
   }
 }
 
+.app-shell {
+  background-color: #F8FAFC;
+  color: #0F172A;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+.dark body,
+.dark .app-shell {
+  background-color: #0B1120;
+  color: #E2E8F0;
+}
+
+.dark [class~="bg-white"],
+.dark [class~="bg-white/95"] {
+  background-color: #111827;
+}
+
+.dark [class~="bg-slate-50"],
+.dark [class~="bg-slate-50/50"],
+.dark [class~="bg-slate-50/60"],
+.dark [class~="bg-slate-100"] {
+  background-color: #1E293B;
+}
+
+.dark [class~="text-slate-900"],
+.dark [class~="text-slate-800"] {
+  color: #F1F5F9;
+}
+
+.dark [class~="text-slate-700"] {
+  color: #CBD5E1;
+}
+
+.dark [class~="text-slate-600"],
+.dark [class~="text-slate-500"] {
+  color: #94A3B8;
+}
+
+.dark [class~="text-slate-400"] {
+  color: #64748B;
+}
+
+.dark [class~="border-slate-100"],
+.dark [class~="border-slate-200"] {
+  border-color: #334155;
+}
+
+.dark [class~="border-slate-300"] {
+  border-color: #475569;
+}
+
+.dark [class~="hover:bg-slate-50"]:hover,
+.dark [class~="hover:bg-slate-100"]:hover {
+  background-color: #334155;
+}
+
+.dark [class~="bg-indigo-50"],
+.dark [class~="bg-indigo-50/70"],
+.dark [class~="bg-indigo-50/30"] {
+  background-color: #1E1B4B;
+}
+
+.dark [class~="text-indigo-700"] {
+  color: #C7D2FE;
+}
+
+.dark [class~="border-indigo-200"] {
+  border-color: #4338CA;
+}
+
+.dark [class~="bg-emerald-50"],
+.dark [class~="bg-emerald-50/70"] {
+  background-color: #052E25;
+}
+
+.dark [class~="text-emerald-900"],
+.dark [class~="text-emerald-800"],
+.dark [class~="text-emerald-700"] {
+  color: #A7F3D0;
+}
+
+.dark [class~="border-emerald-200"] {
+  border-color: #047857;
+}
+
+.dark [class~="bg-red-50"] {
+  background-color: #450A0A;
+}
+
+.dark [class~="text-red-700"] {
+  color: #FCA5A5;
+}
+
+.dark [class~="border-red-200"] {
+  border-color: #991B1B;
+}
+
+.dark [class~="bg-amber-50"] {
+  background-color: #451A03;
+}
+
+.dark [class~="text-amber-700"] {
+  color: #FCD34D;
+}
+
+.dark svg [stroke="#E2E8F0"],
+.dark svg [stroke="#F1F5F9"] {
+  stroke: #334155;
+}
+
+.dark svg [stroke="#CBD5E1"] {
+  stroke: #64748B;
+}
+
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }

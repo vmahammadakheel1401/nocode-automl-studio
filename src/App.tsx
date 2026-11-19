@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, Cpu } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Check, ChevronDown, Cpu, Moon, Sun } from 'lucide-react';
 import {
   StepConfigureTrain,
   TrainingStageStatus,
@@ -84,6 +84,17 @@ function sleep(ms: number) {
 
 export default function App() {
   const initialDataset = useMemo(() => loadSampleDataset('house_prices'), []);
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const savedTheme = window.localStorage.getItem('automl-theme');
+    return savedTheme
+      ? savedTheme === 'dark'
+      : window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDarkMode);
+    window.localStorage.setItem('automl-theme', isDarkMode ? 'dark' : 'light');
+  }, [isDarkMode]);
 
   const [activeStep, setActiveStep] = useState<WorkflowStep>(1);
   const [dataset, setDataset] = useState<ParsedDataset | null>(initialDataset);
@@ -299,7 +310,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col">
+    <div className="app-shell min-h-screen flex flex-col">
       {/* Top Navigation Bar */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-xs border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-6">
@@ -318,57 +329,74 @@ export default function App() {
             </div>
           </div>
 
-          {/* Right Zone: Load Sample Data Dropdown Switcher */}
-          <div className="relative shrink-0" ref={sampleMenuRef}>
+          {/* Right Zone: Appearance and Sample Data Controls */}
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              disabled={isTraining}
-              onClick={() => setSampleMenuOpen((o) => !o)}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs sm:text-sm font-medium text-slate-800 transition-colors whitespace-nowrap shrink-0 disabled:opacity-50 cursor-pointer"
+              onClick={() => setIsDarkMode((dark) => !dark)}
+              aria-pressed={isDarkMode}
+              aria-label="Toggle dark mode"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs sm:text-sm font-medium text-slate-800 transition-colors whitespace-nowrap cursor-pointer"
             >
-              <span>Load Sample Data</span>
-              <ChevronDown className="w-4 h-4 text-slate-500" />
+              {isDarkMode ? (
+                <Sun className="w-4 h-4 text-amber-500" />
+              ) : (
+                <Moon className="w-4 h-4 text-slate-500" />
+              )}
+              <span className="hidden sm:inline">Dark mode</span>
             </button>
 
-            {sampleMenuOpen && (
-              <>
-                <div
-                  className="fixed inset-0 z-10"
-                  onClick={() => setSampleMenuOpen(false)}
-                />
-                <div className="absolute right-0 mt-2 w-72 rounded-xl border border-slate-200 bg-white shadow-lg py-1.5 z-20">
-                  <div className="px-3.5 py-1.5 text-[11px] font-semibold text-slate-400">
-                    Benchmark Datasets
+            <div className="relative shrink-0" ref={sampleMenuRef}>
+              <button
+                type="button"
+                disabled={isTraining}
+                onClick={() => setSampleMenuOpen((o) => !o)}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs sm:text-sm font-medium text-slate-800 transition-colors whitespace-nowrap shrink-0 disabled:opacity-50 cursor-pointer"
+              >
+                <span>Load Sample Data</span>
+                <ChevronDown className="w-4 h-4 text-slate-500" />
+              </button>
+
+              {sampleMenuOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => setSampleMenuOpen(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-72 rounded-xl border border-slate-200 bg-white shadow-lg py-1.5 z-20">
+                    <div className="px-3.5 py-1.5 text-[11px] font-semibold text-slate-400">
+                      Benchmark Datasets
+                    </div>
+                    {(['house_prices', 'customer_churn'] as SampleDatasetKey[]).map(
+                      (key) => {
+                        const meta = SAMPLE_DATASET_META[key];
+                        const isCurrent = activeSampleKey === key;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => handleSelectSample(key)}
+                            className="w-full text-left px-3.5 py-2.5 hover:bg-slate-50 flex items-center justify-between gap-3 transition-colors cursor-pointer"
+                          >
+                            <div>
+                              <div className="text-xs font-semibold text-slate-900">
+                                {meta.dropdownLabel}
+                              </div>
+                              <div className="text-[11px] text-slate-500 font-mono tabular-nums mt-0.5">
+                                {meta.rowCountHint} rows · Target: {meta.targetColumn}
+                              </div>
+                            </div>
+                            {isCurrent && (
+                              <Check className="w-4 h-4 text-indigo-600 shrink-0" />
+                            )}
+                          </button>
+                        );
+                      }
+                    )}
                   </div>
-                  {(['house_prices', 'customer_churn'] as SampleDatasetKey[]).map(
-                    (key) => {
-                      const meta = SAMPLE_DATASET_META[key];
-                      const isCurrent = activeSampleKey === key;
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => handleSelectSample(key)}
-                          className="w-full text-left px-3.5 py-2.5 hover:bg-slate-50 flex items-center justify-between gap-3 transition-colors cursor-pointer"
-                        >
-                          <div>
-                            <div className="text-xs font-semibold text-slate-900">
-                              {meta.dropdownLabel}
-                            </div>
-                            <div className="text-[11px] text-slate-500 font-mono tabular-nums mt-0.5">
-                              {meta.rowCountHint} rows · Target: {meta.targetColumn}
-                            </div>
-                          </div>
-                          {isCurrent && (
-                            <Check className="w-4 h-4 text-indigo-600 shrink-0" />
-                          )}
-                        </button>
-                      );
-                    }
-                  )}
-                </div>
-              </>
-            )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </header>
