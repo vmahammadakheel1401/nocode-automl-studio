@@ -48,7 +48,7 @@ While training and inference run 100% client-side in the browser, exported scrip
 ## 🚀 Getting Started
 
 ### Using the Web App
-1. Open the [AutoML Studio Web App](https://nocode-automl-studio-five.vercel.app/) in your browser.
+1. Open the [AutoML Studio Web App](https://nocode-automl-studio-oyrc.vercel.app/) in your browser.
 2. Click **Load Sample Data** (or upload your own `.csv` file) in **Step 1: Upload & Audit**.
 3. Select your target variable and train models in **Step 2: Configure & Train**.
 4. Review top-performing models in **Step 3: Model Leaderboard**.
